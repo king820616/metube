@@ -51,6 +51,25 @@ disable_nightly_for_non_root() {
     fi
 }
 
+start_bgutil_pot_provider() {
+    echo "Starting BgUtils POT Provider"
+    "$@" >/tmp/bgutil-pot.log 2>&1 &
+    bgutil_pid=$!
+    for _ in 1 2 3 4 5; do
+        if curl -fsS http://127.0.0.1:4416/ping >/dev/null 2>&1; then
+            echo "BgUtils POT Provider is ready"
+            return 0
+        fi
+        if ! kill -0 "$bgutil_pid" 2>/dev/null; then
+            echo "Warning: BgUtils POT Provider exited early; see /tmp/bgutil-pot.log"
+            return 1
+        fi
+        sleep 1
+    done
+    echo "Warning: BgUtils POT Provider did not become ready within 5 seconds; continuing"
+    return 1
+}
+
 if [ `id -u` -eq 0 ] && [ `id -g` -eq 0 ]; then
     if [ "${PUID}" -eq 0 ]; then
         echo "Warning: it is not recommended to run as root user, please check your setting of the PUID/PGID (or legacy UID/GID) environment variables"
@@ -63,16 +82,14 @@ if [ `id -u` -eq 0 ] && [ `id -g` -eq 0 ]; then
         echo "YTDL_NIGHTLY_UPDATE_TIME is set to ${YTDL_NIGHTLY_UPDATE_TIME}; upgrading yt-dlp on startup"
         do_upgrade || true
     fi
-    echo "Starting BgUtils POT Provider"
-    gosu "${PUID}":"${PGID}" bgutil-pot server >/tmp/bgutil-pot.log 2>&1 &
+    start_bgutil_pot_provider gosu "${PUID}":"${PGID}" bgutil-pot server --host 127.0.0.1 --port 4416 || true
     echo "Running MeTube as user ${PUID}:${PGID}"
     run_supervised gosu "${PUID}":"${PGID}" python3 app/main.py
     exit $?
 else
     echo "User set by docker; running MeTube as `id -u`:`id -g`"
     disable_nightly_for_non_root
-    echo "Starting BgUtils POT Provider"
-    bgutil-pot server >/tmp/bgutil-pot.log 2>&1 &
+    start_bgutil_pot_provider bgutil-pot server --host 127.0.0.1 --port 4416 || true
     run_supervised python3 app/main.py
     exit $?
 fi

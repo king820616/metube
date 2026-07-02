@@ -4,6 +4,7 @@
 import os
 import sys
 import asyncio
+import copy
 from datetime import datetime, timedelta
 from pathlib import Path
 from aiohttp import web
@@ -27,6 +28,10 @@ log = logging.getLogger('main')
 
 _NIGHTLY_TIME_RE = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
 _RESTART_FOR_UPDATE = False
+_YOUTUBE_POT_DEFAULT_EXTRACTOR_ARGS = {
+    'youtube': {'player_client': ['mweb']},
+    'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']},
+}
 
 def _request_graceful_exit() -> None:
     raise GracefulExit()
@@ -92,9 +97,10 @@ class Config:
         'LOGLEVEL': 'INFO',
         'ENABLE_ACCESSLOG': 'false',
         'YTDL_NIGHTLY_UPDATE_TIME': '',
+        'ENABLE_YOUTUBE_POT_DEFAULTS': 'false',
     }
 
-    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES')
+    _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES', 'ENABLE_YOUTUBE_POT_DEFAULTS')
 
     def __init__(self):
         for k, v in self._DEFAULTS.items():
@@ -175,6 +181,28 @@ class Config:
     def _apply_runtime_overrides(self):
         self.YTDL_OPTIONS.update(self._runtime_overrides)
 
+    def _apply_youtube_pot_defaults(self):
+        if not self.ENABLE_YOUTUBE_POT_DEFAULTS:
+            return
+        extractor_args = self.YTDL_OPTIONS.setdefault('extractor_args', {})
+        if not isinstance(extractor_args, dict):
+            log.warning(
+                'ENABLE_YOUTUBE_POT_DEFAULTS is true, but YTDL_OPTIONS.extractor_args '
+                'is not an object; skipping YouTube POT defaults'
+            )
+            return
+        for extractor, defaults in _YOUTUBE_POT_DEFAULT_EXTRACTOR_ARGS.items():
+            target = extractor_args.setdefault(extractor, {})
+            if not isinstance(target, dict):
+                log.warning(
+                    'ENABLE_YOUTUBE_POT_DEFAULTS is true, but '
+                    'YTDL_OPTIONS.extractor_args.%s is not an object; skipping it',
+                    extractor,
+                )
+                continue
+            for key, value in defaults.items():
+                target.setdefault(key, copy.deepcopy(value))
+
     # Keys sent to the browser. Sensitive or server-only keys (YTDL_OPTIONS,
     # paths, TLS config, etc.) are intentionally excluded.
     _FRONTEND_KEYS = (
@@ -206,6 +234,7 @@ class Config:
             return (False, msg)
 
         if not self.YTDL_OPTIONS_FILE:
+            self._apply_youtube_pot_defaults()
             self._apply_runtime_overrides()
             return (True, '')
 
@@ -224,6 +253,7 @@ class Config:
             return (False, msg)
 
         self.YTDL_OPTIONS.update(opts)
+        self._apply_youtube_pot_defaults()
         self._apply_runtime_overrides()
         return (True, '')
 

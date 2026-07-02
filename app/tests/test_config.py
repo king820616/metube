@@ -87,6 +87,53 @@ class ConfigTests(unittest.TestCase):
             c = Config()
         self.assertEqual(c.YTDL_OPTIONS["quiet"], True)
 
+    def test_youtube_pot_defaults_disabled_by_default(self):
+        with patch.dict(os.environ, _base_env(), clear=False):
+            c = Config()
+        self.assertNotIn("extractor_args", c.YTDL_OPTIONS)
+
+    def test_youtube_pot_defaults_added_when_enabled(self):
+        with patch.dict(
+            os.environ,
+            _base_env(ENABLE_YOUTUBE_POT_DEFAULTS="true"),
+            clear=False,
+        ):
+            c = Config()
+        self.assertEqual(
+            c.YTDL_OPTIONS["extractor_args"]["youtube"]["player_client"],
+            ["mweb"],
+        )
+        self.assertEqual(
+            c.YTDL_OPTIONS["extractor_args"]["youtubepot-bgutilhttp"]["base_url"],
+            ["http://127.0.0.1:4416"],
+        )
+
+    def test_youtube_pot_defaults_do_not_override_existing_player_client(self):
+        opts = {
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["web"],
+                },
+            },
+        }
+        with patch.dict(
+            os.environ,
+            _base_env(
+                ENABLE_YOUTUBE_POT_DEFAULTS="true",
+                YTDL_OPTIONS=json.dumps(opts),
+            ),
+            clear=False,
+        ):
+            c = Config()
+        self.assertEqual(
+            c.YTDL_OPTIONS["extractor_args"]["youtube"]["player_client"],
+            ["web"],
+        )
+        self.assertEqual(
+            c.YTDL_OPTIONS["extractor_args"]["youtubepot-bgutilhttp"]["base_url"],
+            ["http://127.0.0.1:4416"],
+        )
+
     def test_ytdl_option_presets_json_loaded(self):
         presets = {"Audio extras": {"embed_thumbnail": True}}
         with patch.dict(
