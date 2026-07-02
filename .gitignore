@@ -24,10 +24,12 @@ speed-measure-plugin*.json
 
 # IDE - VSCode
 .vscode/*
-#!.vscode/settings.json
+!.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+!.vscode/scripts/
+!.vscode/scripts/*.ps1
 .history/*
 
 # misc
@@ -52,3 +54,4 @@ pending*
 
 __pycache__
 .venv
+.local

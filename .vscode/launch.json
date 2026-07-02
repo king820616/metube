@@ -1,7 +1,4 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
@@ -9,23 +6,82 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/app/main.py",
+            "cwd": "${workspaceFolder}",
             "windows": {
                 "env": {
-                    "DOWNLOAD_DIR": "${env:USERPROFILE}/Downloads",
-                    "STATE_DIR": "${env:TEMP}",
+                    "BASE_DIR": "${workspaceFolder}",
+                    "HOST": "127.0.0.1",
+                    "PORT": "8081",
+                    "DOWNLOAD_DIR": "${workspaceFolder}/.local/downloads",
+                    "AUDIO_DOWNLOAD_DIR": "${workspaceFolder}/.local/audio",
+                    "STATE_DIR": "${workspaceFolder}/.local/state",
+                    "TEMP_DIR": "${workspaceFolder}/.local/temp",
+                    "COOKIES_DIR": "${workspaceFolder}/.local/cookies",
                     "ALLOW_YTDL_OPTIONS_OVERRIDES": "true",
-                    "YTDL_OPTIONS_PRESETS": "{\"sponsorblock\": {\"postprocessors\": [{\"key\": \"SponsorBlock\", \"categories\": [\"sponsor\", \"selfpromo\", \"interaction\"]}, {\"key\": \"ModifyChapters\", \"remove_sponsor_segments\": [\"sponsor\", \"selfpromo\", \"interaction\"]}]}, \"embed-subs\": {\"writesubtitles\": true, \"writeautomaticsub\": true, \"subtitleslangs\": [\"en\", \"de\"], \"postprocessors\": [{\"key\": \"FFmpegEmbedSubtitle\"}]}, \"limit-rate\": {\"ratelimit\": 5000000}}",
+                    "YTDL_OPTIONS_PRESETS": "{\"sponsorblock\": {\"postprocessors\": [{\"key\": \"SponsorBlock\", \"categories\": [\"sponsor\", \"selfpromo\", \"interaction\"]}, {\"key\": \"ModifyChapters\", \"remove_sponsor_segments\": [\"sponsor\", \"selfpromo\", \"interaction\"]}]}, \"embed-subs\": {\"writesubtitles\": true, \"writeautomaticsub\": true, \"subtitleslangs\": [\"en\", \"de\"], \"postprocessors\": [{\"key\": \"FFmpegEmbedSubtitle\"}]}, \"limit-rate\": {\"ratelimit\": 5000000}}"
                 }
             },
             "osx": {
                 "env": {
-                    "DOWNLOAD_DIR": "${env:HOME}/Downloads",
-                    "STATE_DIR": "${env:TMPDIR}",
+                    "BASE_DIR": "${workspaceFolder}",
+                    "HOST": "127.0.0.1",
+                    "PORT": "8081",
+                    "DOWNLOAD_DIR": "${workspaceFolder}/.local/downloads",
+                    "AUDIO_DOWNLOAD_DIR": "${workspaceFolder}/.local/audio",
+                    "STATE_DIR": "${workspaceFolder}/.local/state",
+                    "TEMP_DIR": "${workspaceFolder}/.local/temp",
+                    "COOKIES_DIR": "${workspaceFolder}/.local/cookies",
                     "ALLOW_YTDL_OPTIONS_OVERRIDES": "true",
-                    "YTDL_OPTIONS_PRESETS": "{\"sponsorblock\": {\"postprocessors\": [{\"key\": \"SponsorBlock\", \"categories\": [\"sponsor\", \"selfpromo\", \"interaction\"]}, {\"key\": \"ModifyChapters\", \"remove_sponsor_segments\": [\"sponsor\", \"selfpromo\", \"interaction\"]}]}, \"embed-subs\": {\"writesubtitles\": true, \"writeautomaticsub\": true, \"subtitleslangs\": [\"en\", \"de\"], \"postprocessors\": [{\"key\": \"FFmpegEmbedSubtitle\"}]}, \"limit-rate\": {\"ratelimit\": 5000000}}",
+                    "YTDL_OPTIONS_PRESETS": "{\"sponsorblock\": {\"postprocessors\": [{\"key\": \"SponsorBlock\", \"categories\": [\"sponsor\", \"selfpromo\", \"interaction\"]}, {\"key\": \"ModifyChapters\", \"remove_sponsor_segments\": [\"sponsor\", \"selfpromo\", \"interaction\"]}]}, \"embed-subs\": {\"writesubtitles\": true, \"writeautomaticsub\": true, \"subtitleslangs\": [\"en\", \"de\"], \"postprocessors\": [{\"key\": \"FFmpegEmbedSubtitle\"}]}, \"limit-rate\": {\"ratelimit\": 5000000}}"
                 }
             },
+            "env": {
+                "BASE_DIR": "${workspaceFolder}",
+                "HOST": "127.0.0.1",
+                "PORT": "8081",
+                "DOWNLOAD_DIR": "${workspaceFolder}/.local/downloads",
+                "AUDIO_DOWNLOAD_DIR": "${workspaceFolder}/.local/audio",
+                "STATE_DIR": "${workspaceFolder}/.local/state",
+                "TEMP_DIR": "${workspaceFolder}/.local/temp",
+                "COOKIES_DIR": "${workspaceFolder}/.local/cookies",
+                "ALLOW_YTDL_OPTIONS_OVERRIDES": "true"
+            },
+            "preLaunchTask": "App: Prepare local",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Python: Backend Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "app/tests/",
+                "-v"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder};${workspaceFolder}/app"
+            },
+            "preLaunchTask": "Backend: Sync deps",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Python: Current Pytest File",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "${file}",
+                "-v"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder};${workspaceFolder}/app"
+            },
+            "preLaunchTask": "Backend: Sync deps",
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }

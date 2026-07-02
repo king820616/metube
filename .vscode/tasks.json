@@ -1,0 +1,245 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Backend: Sync deps",
+      "type": "shell",
+      "command": "uv sync --frozen --group dev",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/.vscode/scripts/sync-backend.ps1"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Prepare local dirs",
+      "type": "shell",
+      "command": "python -c \"from pathlib import Path; [Path(p).mkdir(parents=True, exist_ok=True) for p in ('.local/downloads', '.local/audio', '.local/state', '.local/temp', '.local/cookies')]\"",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/.vscode/scripts/prepare-local.ps1"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: Compile",
+      "type": "shell",
+      "command": "uv run python -m compileall app",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/.vscode/scripts/run-uv.ps1",
+          "run",
+          "python",
+          "-m",
+          "compileall",
+          "app"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "dependsOn": "Backend: Sync deps"
+    },
+    {
+      "label": "Backend: Test",
+      "type": "shell",
+      "command": "uv run pytest app/tests/",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/.vscode/scripts/run-uv.ps1",
+          "run",
+          "pytest",
+          "app/tests/"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "dependsOn": "Backend: Sync deps"
+    },
+    {
+      "label": "Frontend: Install deps",
+      "type": "shell",
+      "command": "corepack enable; pnpm install --frozen-lockfile",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/.vscode/scripts/run-pnpm.ps1",
+          "install",
+          "--frozen-lockfile"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}/ui"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Lint",
+      "type": "shell",
+      "command": "pnpm run lint",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/.vscode/scripts/run-pnpm.ps1",
+          "run",
+          "lint"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}/ui"
+      },
+      "problemMatcher": [],
+      "dependsOn": "Frontend: Install deps"
+    },
+    {
+      "label": "Frontend: Build",
+      "type": "shell",
+      "command": "pnpm run build",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/.vscode/scripts/run-pnpm.ps1",
+          "run",
+          "build"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}/ui"
+      },
+      "problemMatcher": [],
+      "dependsOn": "Frontend: Install deps"
+    },
+    {
+      "label": "Frontend: Test",
+      "type": "shell",
+      "command": "pnpm exec ng test --watch=false",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/.vscode/scripts/run-pnpm.ps1",
+          "exec",
+          "ng",
+          "test",
+          "--watch=false"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}/ui",
+        "env": {
+          "CI": "true"
+        }
+      },
+      "group": "test",
+      "problemMatcher": [],
+      "dependsOn": "Frontend: Install deps"
+    },
+    {
+      "label": "App: Prepare local",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "App: Prepare local dirs",
+        "Backend: Sync deps",
+        "Frontend: Build"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Serve local",
+      "type": "shell",
+      "command": "uv run python app/main.py",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/.vscode/scripts/run-uv.ps1",
+          "run",
+          "python",
+          "app/main.py"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "BASE_DIR": "${workspaceFolder}",
+          "HOST": "127.0.0.1",
+          "PORT": "8081",
+          "DOWNLOAD_DIR": "${workspaceFolder}/.local/downloads",
+          "AUDIO_DOWNLOAD_DIR": "${workspaceFolder}/.local/audio",
+          "STATE_DIR": "${workspaceFolder}/.local/state",
+          "TEMP_DIR": "${workspaceFolder}/.local/temp",
+          "COOKIES_DIR": "${workspaceFolder}/.local/cookies",
+          "ALLOW_YTDL_OPTIONS_OVERRIDES": "true"
+        }
+      },
+      "dependsOn": "App: Prepare local",
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: All",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Backend: Compile",
+        "Backend: Test",
+        "Frontend: Lint",
+        "Frontend: Build",
+        "Frontend: Test"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}
