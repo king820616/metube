@@ -61,6 +61,7 @@ class Config:
         'DOWNLOAD_DIR': '.',
         'AUDIO_DOWNLOAD_DIR': '%%DOWNLOAD_DIR',
         'TEMP_DIR': '%%DOWNLOAD_DIR',
+        'COOKIES_DIR': '',
         'DOWNLOAD_DIRS_INDEXABLE': 'false',
         'CUSTOM_DIRS': 'true',
         'CREATE_CUSTOM_DIRS': 'true',
@@ -319,14 +320,17 @@ serializer = ObjectSerializer()
 
 _STATE_DIR_REAL = os.path.realpath(config.STATE_DIR)
 COOKIES_PATH = os.path.join(config.STATE_DIR, 'cookies.txt')
-DOWNLOAD_DIR_COOKIES_PATH = os.path.join(config.DOWNLOAD_DIR, 'cookies.txt')
-_DOWNLOAD_DIR_COOKIES_REAL = os.path.realpath(DOWNLOAD_DIR_COOKIES_PATH)
+EXTERNAL_COOKIES_PATH = os.path.join(config.COOKIES_DIR, 'cookies.txt') if config.COOKIES_DIR else ''
+LEGACY_DOWNLOAD_DIR_COOKIES_PATH = os.path.join(config.DOWNLOAD_DIR, 'cookies.txt')
+_LEGACY_DOWNLOAD_DIR_COOKIES_REAL = os.path.realpath(LEGACY_DOWNLOAD_DIR_COOKIES_PATH)
 
 
 def _cookie_candidate_paths() -> list[str]:
     paths = []
     seen = set()
-    for path in (COOKIES_PATH, DOWNLOAD_DIR_COOKIES_PATH):
+    for path in (EXTERNAL_COOKIES_PATH, COOKIES_PATH):
+        if not path:
+            continue
         real_path = os.path.realpath(path)
         if real_path in seen:
             continue
@@ -344,7 +348,13 @@ def _find_existing_cookie_path() -> str | None:
 
 def _sync_cookie_runtime_override() -> str | None:
     configured_cookiefile = config.YTDL_OPTIONS.get('cookiefile')
-    if isinstance(configured_cookiefile, str) and configured_cookiefile and os.path.exists(configured_cookiefile):
+    candidate_reals = {os.path.realpath(path) for path in _cookie_candidate_paths()}
+    if (
+        isinstance(configured_cookiefile, str)
+        and configured_cookiefile
+        and os.path.realpath(configured_cookiefile) not in candidate_reals
+        and os.path.exists(configured_cookiefile)
+    ):
         return configured_cookiefile
 
     detected_cookie_path = _find_existing_cookie_path()
@@ -360,7 +370,7 @@ def _is_within_state_dir(real_target: str) -> bool:
 
 
 def _is_blocked_download_target(real_target: str) -> bool:
-    return _is_within_state_dir(real_target) or real_target == _DOWNLOAD_DIR_COOKIES_REAL
+    return _is_within_state_dir(real_target) or real_target == _LEGACY_DOWNLOAD_DIR_COOKIES_REAL
 
 
 @web.middleware
@@ -1098,7 +1108,8 @@ async def upload_cookies(request):
 
 @routes.post(config.URL_PREFIX + 'delete-cookies')
 async def delete_cookies(request):
-    uploaded_cookie_paths = [path for path in _cookie_candidate_paths() if os.path.exists(path)]
+    has_uploaded_cookies = os.path.exists(COOKIES_PATH)
+    has_external_cookies = bool(EXTERNAL_COOKIES_PATH) and os.path.exists(EXTERNAL_COOKIES_PATH)
     configured_cookiefile = config.YTDL_OPTIONS.get('cookiefile')
     candidate_reals = {os.path.realpath(path) for path in _cookie_candidate_paths()}
     has_manual_cookiefile = (
@@ -1107,7 +1118,15 @@ async def delete_cookies(request):
         and os.path.realpath(configured_cookiefile) not in candidate_reals
     )
 
-    if not uploaded_cookie_paths:
+    if not has_uploaded_cookies:
+        if has_external_cookies:
+            return web.Response(
+                status=400,
+                text=serializer.encode({
+                    'status': 'error',
+                    'msg': f'Cookies are configured via {EXTERNAL_COOKIES_PATH}. Remove or replace that mounted file manually.'
+                })
+            )
         if has_manual_cookiefile:
             return web.Response(
                 status=400,
@@ -1118,13 +1137,13 @@ async def delete_cookies(request):
             )
         return web.Response(status=400, text=serializer.encode({'status': 'error', 'msg': 'No uploaded cookies to delete'}))
 
-    for path in uploaded_cookie_paths:
-        os.remove(path)
+    os.remove(COOKIES_PATH)
     config.remove_runtime_override('cookiefile')
     success, msg = config.load_ytdl_options()
     if not success:
         log.error(f'Cookies file deleted, but failed to reload YTDL_OPTIONS: {msg}')
         return web.Response(status=500, text=serializer.encode({'status': 'error', 'msg': f'Cookies file deleted, but failed to reload YTDL_OPTIONS: {msg}'}))
+    _sync_cookie_runtime_override()
 
     log.info('Cookies file deleted')
     return web.Response(text=serializer.encode({'status': 'ok'}))
@@ -1312,8 +1331,7 @@ if __name__ == '__main__':
 
 
     # Auto-detect cookie file on startup. UI uploads are stored under STATE_DIR,
-    # but some hosts expose a file manager that makes it easier to place
-    # cookies.txt directly in DOWNLOAD_DIR.
+    # while deployment-mounted cookies are read from COOKIES_DIR.
     _sync_cookie_runtime_override()
 
     if config.HTTPS:

@@ -256,9 +256,10 @@ async def test_cookie_status(mock_dqueue):
 
 
 @pytest.mark.asyncio
-async def test_cookie_status_detects_download_dir_cookie(mock_dqueue):
-    cookie_path = Path(main.DOWNLOAD_DIR_COOKIES_PATH)
+async def test_cookie_status_detects_external_cookie(mock_dqueue, tmp_path, monkeypatch):
+    cookie_path = tmp_path / "cookies.txt"
     cookie_path.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    monkeypatch.setattr(main, "EXTERNAL_COOKIES_PATH", str(cookie_path))
     try:
         req = MagicMock(spec=web.Request)
         resp = await main.cookie_status(req)
@@ -266,7 +267,6 @@ async def test_cookie_status_detects_download_dir_cookie(mock_dqueue):
         data = json.loads(resp.text)
         assert data == {"status": "ok", "has_cookies": True}
     finally:
-        cookie_path.unlink(missing_ok=True)
         main.config.remove_runtime_override("cookiefile")
 
 
@@ -340,7 +340,7 @@ def test_is_within_state_dir_allows_sibling_downloads():
 
 
 def test_blocked_download_target_blocks_download_dir_cookie():
-    assert main._is_blocked_download_target(os.path.realpath(main.DOWNLOAD_DIR_COOKIES_PATH))
+    assert main._is_blocked_download_target(os.path.realpath(main.LEGACY_DOWNLOAD_DIR_COOKIES_PATH))
 
 
 @pytest.mark.asyncio
