@@ -1,0 +1,4 @@
+Docker Hub build trigger
+
+Requested from Codex on 2026-07-02.
+This file exists only to trigger the existing GitHub Actions Docker build/push workflow without requiring local Docker.
