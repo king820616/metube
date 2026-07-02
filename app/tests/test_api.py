@@ -256,6 +256,21 @@ async def test_cookie_status(mock_dqueue):
 
 
 @pytest.mark.asyncio
+async def test_cookie_status_detects_download_dir_cookie(mock_dqueue):
+    cookie_path = Path(main.DOWNLOAD_DIR_COOKIES_PATH)
+    cookie_path.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    try:
+        req = MagicMock(spec=web.Request)
+        resp = await main.cookie_status(req)
+        assert resp.status == 200
+        data = json.loads(resp.text)
+        assert data == {"status": "ok", "has_cookies": True}
+    finally:
+        cookie_path.unlink(missing_ok=True)
+        main.config.remove_runtime_override("cookiefile")
+
+
+@pytest.mark.asyncio
 async def test_options_add_cors(mock_dqueue):
     req = MagicMock(spec=web.Request)
     resp = await main.add_cors(req)
@@ -347,3 +362,17 @@ async def test_download_blocks_state_dir_files(monkeypatch):
         (state_dir / "cookies.txt").unlink(missing_ok=True)
         (download_dir / "video.mp4").unlink(missing_ok=True)
         state_dir.rmdir()
+
+
+@pytest.mark.asyncio
+async def test_download_blocks_download_dir_cookie_file():
+    download_dir = Path(main.config.DOWNLOAD_DIR)
+    cookie_path = download_dir / "cookies.txt"
+    cookie_path.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+
+    try:
+        async with TestClient(TestServer(main.app)) as client:
+            blocked = await client.get("/download/cookies.txt")
+            assert blocked.status == 404
+    finally:
+        cookie_path.unlink(missing_ok=True)

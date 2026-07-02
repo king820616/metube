@@ -318,10 +318,49 @@ class ObjectSerializer(json.JSONEncoder):
 serializer = ObjectSerializer()
 
 _STATE_DIR_REAL = os.path.realpath(config.STATE_DIR)
+COOKIES_PATH = os.path.join(config.STATE_DIR, 'cookies.txt')
+DOWNLOAD_DIR_COOKIES_PATH = os.path.join(config.DOWNLOAD_DIR, 'cookies.txt')
+_DOWNLOAD_DIR_COOKIES_REAL = os.path.realpath(DOWNLOAD_DIR_COOKIES_PATH)
+
+
+def _cookie_candidate_paths() -> list[str]:
+    paths = []
+    seen = set()
+    for path in (COOKIES_PATH, DOWNLOAD_DIR_COOKIES_PATH):
+        real_path = os.path.realpath(path)
+        if real_path in seen:
+            continue
+        seen.add(real_path)
+        paths.append(path)
+    return paths
+
+
+def _find_existing_cookie_path() -> str | None:
+    for path in _cookie_candidate_paths():
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _sync_cookie_runtime_override() -> str | None:
+    configured_cookiefile = config.YTDL_OPTIONS.get('cookiefile')
+    if isinstance(configured_cookiefile, str) and configured_cookiefile and os.path.exists(configured_cookiefile):
+        return configured_cookiefile
+
+    detected_cookie_path = _find_existing_cookie_path()
+    if detected_cookie_path:
+        config.set_runtime_override('cookiefile', detected_cookie_path)
+        log.info(f'Cookie file detected at {detected_cookie_path}')
+        return detected_cookie_path
+    return None
 
 
 def _is_within_state_dir(real_target: str) -> bool:
     return real_target == _STATE_DIR_REAL or real_target.startswith(_STATE_DIR_REAL + os.sep)
+
+
+def _is_blocked_download_target(real_target: str) -> bool:
+    return _is_within_state_dir(real_target) or real_target == _DOWNLOAD_DIR_COOKIES_REAL
 
 
 @web.middleware
@@ -333,7 +372,7 @@ async def state_dir_guard(request, handler):
         if request.path.startswith(prefix):
             rel = unquote(request.path[len(prefix):])
             target = os.path.realpath(os.path.join(base, rel))
-            if _is_within_state_dir(target):
+            if _is_blocked_download_target(target):
                 raise web.HTTPNotFound()
             break
     return await handler(request)
@@ -859,6 +898,7 @@ def parse_download_options(post: dict) -> dict:
 @routes.post(config.URL_PREFIX + 'add')
 async def add(request):
     log.info("Received request to add download")
+    _sync_cookie_runtime_override()
     post = await _read_json_request(request)
     try:
         o = parse_download_options(post)
@@ -911,6 +951,7 @@ async def cancel_add(request):
 @routes.post(config.URL_PREFIX + 'subscribe')
 async def subscribe(request):
     post = await _read_json_request(request)
+    _sync_cookie_runtime_override()
     o = parse_download_options(post)
     cic = post.get('check_interval_minutes')
     if cic is None:
@@ -1015,13 +1056,11 @@ async def delete(request):
 @routes.post(config.URL_PREFIX + 'start')
 async def start(request):
     post = await _read_json_request(request)
+    _sync_cookie_runtime_override()
     ids = post.get('ids')
     log.info(f"Received request to start pending downloads for ids: {ids}")
     status = await dqueue.start_pending(ids)
     return web.Response(text=serializer.encode(status))
-
-
-COOKIES_PATH = os.path.join(config.STATE_DIR, 'cookies.txt')
 
 @routes.post(config.URL_PREFIX + 'upload-cookies')
 async def upload_cookies(request):
@@ -1042,6 +1081,7 @@ async def upload_cookies(request):
             return web.Response(status=400, text=serializer.encode({'status': 'error', 'msg': 'Cookie file too large (max 1MB)'}))
         content.extend(chunk)
 
+    os.makedirs(os.path.dirname(COOKIES_PATH), exist_ok=True)
     tmp_cookie_path = f"{COOKIES_PATH}.tmp"
     with open(tmp_cookie_path, 'wb') as f:
         f.write(content)
@@ -1058,11 +1098,16 @@ async def upload_cookies(request):
 
 @routes.post(config.URL_PREFIX + 'delete-cookies')
 async def delete_cookies(request):
-    has_uploaded_cookies = os.path.exists(COOKIES_PATH)
+    uploaded_cookie_paths = [path for path in _cookie_candidate_paths() if os.path.exists(path)]
     configured_cookiefile = config.YTDL_OPTIONS.get('cookiefile')
-    has_manual_cookiefile = isinstance(configured_cookiefile, str) and configured_cookiefile and configured_cookiefile != COOKIES_PATH
+    candidate_reals = {os.path.realpath(path) for path in _cookie_candidate_paths()}
+    has_manual_cookiefile = (
+        isinstance(configured_cookiefile, str)
+        and configured_cookiefile
+        and os.path.realpath(configured_cookiefile) not in candidate_reals
+    )
 
-    if not has_uploaded_cookies:
+    if not uploaded_cookie_paths:
         if has_manual_cookiefile:
             return web.Response(
                 status=400,
@@ -1073,7 +1118,8 @@ async def delete_cookies(request):
             )
         return web.Response(status=400, text=serializer.encode({'status': 'error', 'msg': 'No uploaded cookies to delete'}))
 
-    os.remove(COOKIES_PATH)
+    for path in uploaded_cookie_paths:
+        os.remove(path)
     config.remove_runtime_override('cookiefile')
     success, msg = config.load_ytdl_options()
     if not success:
@@ -1085,10 +1131,11 @@ async def delete_cookies(request):
 
 @routes.get(config.URL_PREFIX + 'cookie-status')
 async def cookie_status(request):
+    detected_cookie_path = _sync_cookie_runtime_override()
     configured_cookiefile = config.YTDL_OPTIONS.get('cookiefile')
     has_configured_cookies = isinstance(configured_cookiefile, str) and os.path.exists(configured_cookiefile)
-    has_uploaded_cookies = os.path.exists(COOKIES_PATH)
-    exists = has_uploaded_cookies or has_configured_cookies
+    has_uploaded_cookies = any(os.path.exists(path) for path in _cookie_candidate_paths())
+    exists = bool(detected_cookie_path) or has_uploaded_cookies or has_configured_cookies
     return web.Response(text=serializer.encode({'status': 'ok', 'has_cookies': exists}))
 
 @routes.get(config.URL_PREFIX + 'history')
@@ -1264,10 +1311,10 @@ if __name__ == '__main__':
     log.info(f"Listening on {config.HOST}:{config.PORT}")
 
 
-    # Auto-detect cookie file on startup
-    if os.path.exists(COOKIES_PATH):
-        config.set_runtime_override('cookiefile', COOKIES_PATH)
-        log.info(f'Cookie file detected at {COOKIES_PATH}')
+    # Auto-detect cookie file on startup. UI uploads are stored under STATE_DIR,
+    # but some hosts expose a file manager that makes it easier to place
+    # cookies.txt directly in DOWNLOAD_DIR.
+    _sync_cookie_runtime_override()
 
     if config.HTTPS:
         ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
