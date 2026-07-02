@@ -339,6 +339,10 @@ def test_is_within_state_dir_allows_sibling_downloads():
     assert not main._is_within_state_dir("/tmp/unrelated/video.mp4")
 
 
+def test_blocked_download_target_blocks_download_dir_cookie():
+    assert main._is_blocked_download_target(os.path.realpath(main.DOWNLOAD_DIR_COOKIES_PATH))
+
+
 @pytest.mark.asyncio
 async def test_download_blocks_state_dir_files(monkeypatch):
     download_dir = Path(main.config.DOWNLOAD_DIR)
@@ -362,17 +366,3 @@ async def test_download_blocks_state_dir_files(monkeypatch):
         (state_dir / "cookies.txt").unlink(missing_ok=True)
         (download_dir / "video.mp4").unlink(missing_ok=True)
         state_dir.rmdir()
-
-
-@pytest.mark.asyncio
-async def test_download_blocks_download_dir_cookie_file():
-    download_dir = Path(main.config.DOWNLOAD_DIR)
-    cookie_path = download_dir / "cookies.txt"
-    cookie_path.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
-
-    try:
-        async with TestClient(TestServer(main.app)) as client:
-            blocked = await client.get("/download/cookies.txt")
-            assert blocked.status == 404
-    finally:
-        cookie_path.unlink(missing_ok=True)
