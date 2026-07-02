@@ -101,7 +101,7 @@ class ConfigTests(unittest.TestCase):
             c = Config()
         self.assertEqual(
             c.YTDL_OPTIONS["extractor_args"]["youtube"]["player_client"],
-            ["mweb"],
+            ["default", "mweb"],
         )
         self.assertEqual(
             c.YTDL_OPTIONS["extractor_args"]["youtubepot-bgutilhttp"]["base_url"],

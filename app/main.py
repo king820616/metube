@@ -29,7 +29,7 @@ log = logging.getLogger('main')
 _NIGHTLY_TIME_RE = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
 _RESTART_FOR_UPDATE = False
 _YOUTUBE_POT_DEFAULT_EXTRACTOR_ARGS = {
-    'youtube': {'player_client': ['mweb']},
+    'youtube': {'player_client': ['default', 'mweb']},
     'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']},
 }
 
