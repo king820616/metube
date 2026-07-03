@@ -93,6 +93,8 @@ jobs:
           push: true
           build-args: |
             VERSION=${{ steps.date.outputs.date }}
+            GIT_SHA=${{ github.sha }}
+            IMAGE_REPOSITORY=king820616/metube
           tags: |
             king820616/metube:latest
             king820616/metube:${{ steps.date.outputs.date }}

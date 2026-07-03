@@ -74,6 +74,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD curl 
 
 # Add build-time argument for version
 ARG VERSION=dev
+ARG GIT_SHA=unknown
+ARG IMAGE_REPOSITORY=king820616/metube
 ENV METUBE_VERSION=$VERSION
+ENV METUBE_GIT_SHA=$GIT_SHA
+ENV METUBE_IMAGE_REPOSITORY=$IMAGE_REPOSITORY
 
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "./docker-entrypoint.sh"]

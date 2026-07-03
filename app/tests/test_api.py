@@ -259,6 +259,22 @@ async def test_version_json(mock_dqueue):
     assert resp.status == 200
     body = json.loads(resp.text)
     assert "yt-dlp" in body and "version" in body
+    assert "image_digest" in body and "git_sha" in body
+
+
+@pytest.mark.asyncio
+async def test_version_prefers_image_digest_env(mock_dqueue, monkeypatch):
+    digest = "a" * 64
+    monkeypatch.setenv("METUBE_IMAGE_DIGEST", digest)
+    monkeypatch.setenv("METUBE_GIT_SHA", "abc123")
+    req = MagicMock(spec=web.Request)
+    resp = await main.version(req)
+    assert resp.status == 200
+    body = json.loads(resp.text)
+    assert body["image_digest"] == f"sha256:{digest}"
+    assert body["image_sha256"] == digest
+    assert body["image_digest_source"] == "env"
+    assert body["git_sha"] == "abc123"
 
 
 @pytest.mark.asyncio

@@ -159,6 +159,32 @@
         </div>
       </div>
 
+      @if (!hasCookies) {
+        <div class="cookie-auth-alert mb-3">
+          <fa-icon [icon]="faTriangleExclamation" class="cookie-auth-icon" />
+          <div class="cookie-auth-copy">
+            <div class="cookie-auth-title">YouTube cookies required</div>
+            <div class="cookie-auth-text">
+              Zeabur-hosted YouTube downloads usually need the current user's browser cookies. Authorize this session before adding YouTube URLs.
+            </div>
+          </div>
+          <div class="cookie-auth-actions">
+            <label class="btn btn-warning btn-sm mb-0"
+              [class.disabled]="cookieUploadInProgress || addInProgress"
+              for="cookie-upload">
+              <fa-icon [icon]="faUpload" class="me-1" />
+              Upload cookies.txt
+            </label>
+            <a class="btn btn-outline-secondary btn-sm"
+              href="https://github.com/king820616/metube/tree/master/browser-extension"
+              target="_blank"
+              rel="noopener">
+              Cookie helper
+            </a>
+          </div>
+        </div>
+      }
+
       <!-- Options Row -->
       <div class="row mb-3 g-3">
         @if (downloadType === 'video') {
@@ -1061,6 +1087,13 @@
           <span class="version-value">{{metubeVersion}}</span>
         </div>
         <div class="version-separator"></div>
+        @if (imageShaValue) {
+          <div class="version-item version-item-digest">
+            <span class="version-label">{{imageShaLabel}}</span>
+            <span class="version-value version-value-digest" [title]="imageShaValue">{{imageShaValue}}</span>
+          </div>
+          <div class="version-separator"></div>
+        }
         @if (ytDlpOptionsUpdateTime) {
           <div class="version-item">
             <span class="version-label">yt-dlp-options</span>

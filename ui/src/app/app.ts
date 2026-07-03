@@ -7,7 +7,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FontAwesomeModule } from '@fortawesome/angular-fontawesome';
 import { NgbModule, NgbTypeahead } from '@ng-bootstrap/ng-bootstrap';
 import { NgSelectModule } from '@ng-select/ng-select';
-import { faTrashAlt, faCheckCircle, faTimesCircle, faRedoAlt, faSun, faMoon, faCheck, faCircleHalfStroke, faDownload, faExternalLinkAlt, faFileImport, faFileExport, faCopy, faClock, faTachometerAlt, faSortAmountDown, faSortAmountUp, faChevronRight, faChevronDown, faUpload, faPause, faPlay, faShareNodes } from '@fortawesome/free-solid-svg-icons';
+import { faTrashAlt, faCheckCircle, faTimesCircle, faRedoAlt, faSun, faMoon, faCheck, faCircleHalfStroke, faDownload, faExternalLinkAlt, faFileImport, faFileExport, faCopy, faClock, faTachometerAlt, faSortAmountDown, faSortAmountUp, faChevronRight, faChevronDown, faUpload, faPause, faPlay, faShareNodes, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
 import { faGithub } from '@fortawesome/free-brands-svg-icons';
 import { CookieService } from 'ngx-cookie-service';
 import { AddDownloadPayload, DownloadsService } from './services/downloads.service';
@@ -133,6 +133,8 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   ytDlpOptionsUpdateTime: string | null = null;
   ytDlpVersion: string | null = null;
   metubeVersion: string | null = null;
+  imageShaLabel = 'Image SHA256';
+  imageShaValue: string | null = null;
   isAdvancedOpen = false;
   sortAscending = false;
   expandedErrors: Set<string> = new Set<string>();
@@ -198,6 +200,7 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   faPause = faPause;
   faPlay = faPlay;
   faShareNodes = faShareNodes;
+  faTriangleExclamation = faTriangleExclamation;
   subtitleLanguages = [
     { id: 'en', text: 'English' },
     { id: 'ar', text: 'Arabic' },
@@ -1078,6 +1081,10 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
     if (!this.validateYtdlOptionsOverrides(payload.ytdlOptionsOverrides)) {
       return;
     }
+    if (this.isYouTubeUrl(payload.url) && !this.hasCookies) {
+      this.toasts.error('YouTube downloads need session cookies on this deployment. Upload cookies.txt or use the MeTube Cookie Helper first.');
+      return;
+    }
 
     this.addInProgress = true;
     this.cancelRequested = false;
@@ -1475,15 +1482,33 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
     // eslint-disable-next-line no-useless-escape
     const baseUrl = `${window.location.origin}${window.location.pathname.replace(/\/[^\/]*$/, '/')}`;
     const versionUrl = `${baseUrl}version`;
-    this.http.get<{ 'yt-dlp': string, version: string }>(versionUrl)
+    this.http.get<{
+      'yt-dlp': string;
+      version: string;
+      git_sha?: string | null;
+      image_digest?: string | null;
+      image_sha256?: string | null;
+      image_digest_source?: string | null;
+    }>(versionUrl)
       .subscribe({
         next: (data) => {
           this.ytDlpVersion = data['yt-dlp'];
           this.metubeVersion = data.version;
+          const digest = data.image_digest || (data.image_sha256 ? `sha256:${data.image_sha256}` : null);
+          if (digest) {
+            this.imageShaLabel = 'Image SHA256';
+            this.imageShaValue = digest;
+          } else if (data.git_sha) {
+            this.imageShaLabel = 'Build SHA';
+            this.imageShaValue = data.git_sha;
+          } else {
+            this.imageShaValue = null;
+          }
         },
         error: () => {
           this.ytDlpVersion = null;
           this.metubeVersion = null;
+          this.imageShaValue = null;
         }
       });
   }
@@ -1624,6 +1649,17 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
       this.hasGlobalCookies = !!(data && typeof data === 'object' && 'has_global_cookies' in data && data.has_global_cookies);
       this.cdr.markForCheck();
     });
+  }
+
+  private isYouTubeUrl(url: string | undefined): boolean {
+    if (!url) return false;
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase();
+      return host === 'youtu.be' || host === 'youtube.com' || host.endsWith('.youtube.com');
+    } catch {
+      return /\b(youtu\.be|youtube\.com)\b/i.test(url);
+    }
   }
 
   private getOrCreateCookieProfile(): string {

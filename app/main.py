@@ -19,7 +19,10 @@ import socketio
 import logging
 import json
 import pathlib
+import platform
 import re
+import urllib.error
+import urllib.request
 from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
 from watchfiles import DefaultFilter, Change, awatch
 
@@ -31,6 +34,13 @@ log = logging.getLogger('main')
 
 _NIGHTLY_TIME_RE = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
 _RESTART_FOR_UPDATE = False
+_DOCKERHUB_DIGEST_CACHE = {
+    'key': None,
+    'value': None,
+    'source': None,
+    'index': None,
+    'expires_at': 0,
+}
 _YOUTUBE_POT_DEFAULT_EXTRACTOR_ARGS = {
     'youtube': {'player_client': ['default', 'mweb']},
     'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']},
@@ -48,6 +58,99 @@ def seconds_until_next_daily_time(time_hhmm: str, now: datetime | None = None) -
     if target <= now:
         target += timedelta(days=1)
     return (target - now).total_seconds()
+
+
+def _first_env(*names: str) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def _normalize_sha256_digest(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    if value.startswith('sha256:'):
+        digest = value[7:]
+    else:
+        digest = value
+    if re.fullmatch(r'[0-9a-fA-F]{64}', digest):
+        return f'sha256:{digest.lower()}'
+    return value
+
+
+def _docker_arch() -> str | None:
+    machine = platform.machine().lower()
+    if machine in ('x86_64', 'amd64'):
+        return 'amd64'
+    if machine in ('aarch64', 'arm64'):
+        return 'arm64'
+    if machine.startswith('armv7'):
+        return 'arm'
+    return machine or None
+
+
+def _fetch_dockerhub_digest(repo: str, tag: str) -> tuple[str | None, str | None, str | None]:
+    """Return platform digest, source, and index digest for a Docker Hub tag."""
+    key = f'{repo}:{tag}:{_docker_arch() or ""}'
+    now = time.time()
+    if _DOCKERHUB_DIGEST_CACHE['key'] == key and _DOCKERHUB_DIGEST_CACHE['expires_at'] > now:
+        return (
+            _DOCKERHUB_DIGEST_CACHE['value'],
+            _DOCKERHUB_DIGEST_CACHE['source'],
+            _DOCKERHUB_DIGEST_CACHE['index'],
+        )
+
+    url = f'https://hub.docker.com/v2/repositories/{repo}/tags/{tag}'
+    req = urllib.request.Request(url, headers={'User-Agent': 'metube-version'})
+    digest = None
+    source = None
+    index_digest = None
+    try:
+        with urllib.request.urlopen(req, timeout=2.5) as response:
+            payload = json.loads(response.read().decode('utf-8'))
+        index_digest = _normalize_sha256_digest(payload.get('digest'))
+        arch = _docker_arch()
+        for image in payload.get('images') or []:
+            if image.get('os') == 'linux' and image.get('architecture') == arch:
+                digest = _normalize_sha256_digest(image.get('digest'))
+                source = f'dockerhub-{arch}'
+                break
+        if digest is None:
+            digest = index_digest
+            source = 'dockerhub-index' if digest else None
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        log.debug('Could not resolve Docker Hub image digest for %s:%s: %s', repo, tag, exc)
+
+    _DOCKERHUB_DIGEST_CACHE.update({
+        'key': key,
+        'value': digest,
+        'source': source,
+        'index': index_digest,
+        'expires_at': now + 600,
+    })
+    return digest, source, index_digest
+
+
+def _resolve_image_digest(version: str) -> tuple[str | None, str | None, str | None]:
+    digest = _normalize_sha256_digest(_first_env(
+        'METUBE_IMAGE_DIGEST',
+        'METUBE_IMAGE_SHA256',
+        'ZEABUR_IMAGE_DIGEST',
+        'ZEABUR_DEPLOYMENT_IMAGE_DIGEST',
+        'CONTAINER_IMAGE_DIGEST',
+        'IMAGE_DIGEST',
+    ))
+    if digest:
+        return digest, 'env', digest
+
+    repo = _first_env('METUBE_IMAGE_REPOSITORY', 'IMAGE_REPOSITORY') or 'king820616/metube'
+    tag = _first_env('METUBE_IMAGE_TAG', 'IMAGE_TAG') or version
+    if not repo or not tag or tag == 'dev':
+        return None, None, None
+    return _fetch_dockerhub_digest(repo, tag)
 
 def parseLogLevel(logLevel):
     if not isinstance(logLevel, str):
@@ -1476,9 +1579,19 @@ async def robots(request):
 
 @routes.get(config.URL_PREFIX + 'version')
 async def version(request):
+    metube_version = os.getenv("METUBE_VERSION", "dev")
+    image_digest, image_digest_source, image_index_digest = await asyncio.to_thread(
+        _resolve_image_digest,
+        metube_version,
+    )
     return web.json_response({
         "yt-dlp": yt_dlp_version,
-        "version": os.getenv("METUBE_VERSION", "dev")
+        "version": metube_version,
+        "git_sha": _first_env('METUBE_GIT_SHA', 'GITHUB_SHA', 'SOURCE_COMMIT', 'COMMIT_SHA', 'ZEABUR_GIT_COMMIT_SHA'),
+        "image_digest": image_digest,
+        "image_sha256": image_digest.removeprefix('sha256:') if image_digest and image_digest.startswith('sha256:') else image_digest,
+        "image_digest_source": image_digest_source,
+        "image_index_digest": image_index_digest,
     })
 
 if config.URL_PREFIX != '/':
