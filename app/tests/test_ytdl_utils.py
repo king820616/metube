@@ -40,6 +40,7 @@ from ytdl import (
     DownloadInfo,
     _compact_persisted_entry,
     _convert_srt_to_txt_file,
+    _download_info_to_record,
     _resolve_outtmpl_fields,
     _sanitize_entry_for_pickle,
     _sanitize_path_component,
@@ -272,6 +273,31 @@ class DownloadInfoSetstateTests(unittest.TestCase):
         self.assertEqual(di.playlist_item_limit, 0)
         self.assertFalse(di.split_by_chapters)
         self.assertEqual(di.chapter_template, "")
+
+    def test_public_and_persisted_options_redact_cookiefile(self):
+        di = DownloadInfo(
+            id="id1",
+            title="t",
+            url="http://example.com/v",
+            quality="best",
+            download_type="video",
+            codec="auto",
+            format="any",
+            folder="",
+            custom_name_prefix="",
+            error=None,
+            entry=None,
+            playlist_item_limit=0,
+            split_by_chapters=False,
+            chapter_template="",
+            ytdl_options_overrides={
+                "cookiefile": "/tmp/cookies.txt",
+                "proxy": "http://proxy",
+            },
+        )
+        self.assertEqual(di.to_public_dict()["ytdl_options_overrides"], {"proxy": "http://proxy"})
+        record = _download_info_to_record(di, include_entry=False)
+        self.assertEqual(record["ytdl_options_overrides"], {"proxy": "http://proxy"})
 
 
 class CompactPersistedEntryTests(unittest.TestCase):

@@ -5,8 +5,11 @@ import os
 import sys
 import asyncio
 import copy
+import hashlib
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from collections.abc import Mapping
 from aiohttp import web
 from aiohttp.web import GracefulExit
 from aiohttp.log import access_logger
@@ -99,6 +102,7 @@ class Config:
         'ENABLE_ACCESSLOG': 'false',
         'YTDL_NIGHTLY_UPDATE_TIME': '',
         'ENABLE_YOUTUBE_POT_DEFAULTS': 'false',
+        'COOKIE_PROFILE_TTL_SECONDS': '21600',
     }
 
     _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES', 'ENABLE_YOUTUBE_POT_DEFAULTS')
@@ -323,6 +327,128 @@ COOKIES_PATH = os.path.join(config.STATE_DIR, 'cookies.txt')
 EXTERNAL_COOKIES_PATH = os.path.join(config.COOKIES_DIR, 'cookies.txt') if config.COOKIES_DIR else ''
 LEGACY_DOWNLOAD_DIR_COOKIES_PATH = os.path.join(config.DOWNLOAD_DIR, 'cookies.txt')
 _LEGACY_DOWNLOAD_DIR_COOKIES_REAL = os.path.realpath(LEGACY_DOWNLOAD_DIR_COOKIES_PATH)
+COOKIE_PROFILE_TEMP_DIR = os.path.join(config.TEMP_DIR, '.metube-cookie-profiles')
+_COOKIE_PROFILE_TEMP_DIR_REAL = os.path.realpath(COOKIE_PROFILE_TEMP_DIR)
+_COOKIE_PROFILE_RE = re.compile(r'^[A-Za-z0-9._~-]{16,256}$')
+
+
+class CookieProfileStore:
+    """Ephemeral per-browser cookies for no-volume deployments."""
+
+    def __init__(self, temp_dir: str, ttl_seconds: str | int):
+        self.temp_dir = temp_dir
+        try:
+            ttl = int(ttl_seconds)
+        except (TypeError, ValueError):
+            log.warning('COOKIE_PROFILE_TTL_SECONDS is invalid, falling back to 21600 seconds')
+            ttl = 21600
+        self.ttl_seconds = max(60, ttl)
+        self._profiles: dict[str, dict] = {}
+        self._remove_untracked_files()
+
+    def is_valid_profile_id(self, profile_id: str) -> bool:
+        return bool(_COOKIE_PROFILE_RE.fullmatch(profile_id))
+
+    def _require_profile_id(self, profile_id: str) -> str:
+        if not isinstance(profile_id, str):
+            raise ValueError('cookie_profile must be a string')
+        profile_id = profile_id.strip()
+        if not self.is_valid_profile_id(profile_id):
+            raise ValueError('cookie_profile must be 16-256 URL-safe characters')
+        return profile_id
+
+    def _path_for_profile(self, profile_id: str) -> str:
+        digest = hashlib.sha256(profile_id.encode('utf-8')).hexdigest()[:32]
+        return os.path.join(self.temp_dir, f'cookies-{digest}.txt')
+
+    def _expires_at(self) -> float:
+        return time.time() + self.ttl_seconds
+
+    def _remove_file(self, path: str | None) -> None:
+        if not path:
+            return
+        try:
+            real_path = os.path.realpath(path)
+            real_temp = os.path.realpath(self.temp_dir)
+            if os.path.commonpath([real_temp, real_path]) != real_temp:
+                return
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as exc:
+            log.debug('Could not remove cookie profile file %s: %s', path, exc)
+
+    def _remove_untracked_files(self) -> None:
+        try:
+            if not os.path.isdir(self.temp_dir):
+                return
+            for name in os.listdir(self.temp_dir):
+                if name.startswith('cookies-') and name.endswith('.txt'):
+                    self._remove_file(os.path.join(self.temp_dir, name))
+        except OSError as exc:
+            log.debug('Could not clean cookie profile temp dir: %s', exc)
+
+    def cleanup_expired(self) -> None:
+        now = time.time()
+        for profile_id, data in list(self._profiles.items()):
+            if data['expires_at'] <= now or not os.path.exists(data['path']):
+                self._remove_file(data.get('path'))
+                self._profiles.pop(profile_id, None)
+
+    def put(self, profile_id: str, content: bytes) -> dict:
+        profile_id = self._require_profile_id(profile_id)
+        self.cleanup_expired()
+        os.makedirs(self.temp_dir, exist_ok=True)
+        path = self._path_for_profile(profile_id)
+        tmp_path = f'{path}.tmp'
+        with open(tmp_path, 'wb') as f:
+            f.write(content)
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError as exc:
+            log.warning('Could not restrict permissions on profile cookies file: %s', exc)
+        os.replace(tmp_path, path)
+        expires_at = self._expires_at()
+        self._profiles[profile_id] = {
+            'path': path,
+            'size': len(content),
+            'expires_at': expires_at,
+        }
+        return self.status(profile_id)
+
+    def resolve_cookiefile(self, profile_id: str | None) -> str | None:
+        if not profile_id:
+            return None
+        profile_id = self._require_profile_id(profile_id)
+        self.cleanup_expired()
+        data = self._profiles.get(profile_id)
+        if not data or not os.path.exists(data['path']):
+            self._profiles.pop(profile_id, None)
+            return None
+        data['expires_at'] = self._expires_at()
+        return data['path']
+
+    def delete(self, profile_id: str) -> bool:
+        profile_id = self._require_profile_id(profile_id)
+        data = self._profiles.pop(profile_id, None)
+        self._remove_file(data.get('path') if data else self._path_for_profile(profile_id))
+        return data is not None
+
+    def status(self, profile_id: str | None) -> dict:
+        if not profile_id:
+            return {'has_cookies': False, 'expires_at': None, 'ttl_seconds': self.ttl_seconds}
+        profile_id = self._require_profile_id(profile_id)
+        self.cleanup_expired()
+        data = self._profiles.get(profile_id)
+        has_cookies = bool(data and os.path.exists(data['path']))
+        return {
+            'has_cookies': has_cookies,
+            'expires_at': data['expires_at'] if has_cookies else None,
+            'ttl_seconds': self.ttl_seconds,
+        }
+
+
+cookie_profiles = CookieProfileStore(COOKIE_PROFILE_TEMP_DIR, config.COOKIE_PROFILE_TTL_SECONDS)
 
 
 def _cookie_candidate_paths() -> list[str]:
@@ -370,7 +496,11 @@ def _is_within_state_dir(real_target: str) -> bool:
 
 
 def _is_blocked_download_target(real_target: str) -> bool:
-    return _is_within_state_dir(real_target) or real_target == _LEGACY_DOWNLOAD_DIR_COOKIES_REAL
+    in_cookie_profile_temp = (
+        real_target == _COOKIE_PROFILE_TEMP_DIR_REAL
+        or real_target.startswith(_COOKIE_PROFILE_TEMP_DIR_REAL + os.sep)
+    )
+    return _is_within_state_dir(real_target) or real_target == _LEGACY_DOWNLOAD_DIR_COOKIES_REAL or in_cookie_profile_temp
 
 
 @web.middleware
@@ -418,6 +548,36 @@ def _parse_ytdl_options_overrides(value, *, enabled: bool) -> dict:
         raise web.HTTPBadRequest(reason='ytdl_options_overrides are disabled')
 
     return value
+
+
+def _parse_cookie_profile(value) -> str | None:
+    if value is None or value == '':
+        return None
+    if not isinstance(value, str):
+        raise web.HTTPBadRequest(reason='cookie_profile must be a string')
+    value = value.strip()
+    if not value:
+        return None
+    if not cookie_profiles.is_valid_profile_id(value):
+        raise web.HTTPBadRequest(reason='cookie_profile must be 16-256 URL-safe characters')
+    return value
+
+
+def _request_cookie_profile(request: web.Request) -> str | None:
+    query = getattr(request, 'query', None)
+    value = query.get('cookie_profile') if isinstance(query, Mapping) else None
+    return _parse_cookie_profile(value)
+
+
+def _apply_cookie_profile_override(overrides: dict, cookiefile: str | None) -> dict:
+    if not cookiefile:
+        return overrides
+    merged = dict(overrides or {})
+    # Explicit per-download cookie options are user intent when overrides are enabled.
+    if any(k in merged for k in ('cookiefile', 'cookiesfrombrowser', 'cookies_from_browser')):
+        return merged
+    merged['cookiefile'] = cookiefile
+    return merged
 
 
 _YOUTUBE_T_COMPACT_RE = re.compile(
@@ -910,18 +1070,25 @@ async def add(request):
     log.info("Received request to add download")
     _sync_cookie_runtime_override()
     post = await _read_json_request(request)
+    cookie_profile = _parse_cookie_profile(post.get('cookie_profile'))
     try:
         o = parse_download_options(post)
     except web.HTTPBadRequest as e:
         log.error("Bad request: %s", e.reason)
         raise
+    profile_cookiefile = cookie_profiles.resolve_cookiefile(cookie_profile)
+    o['ytdl_options_overrides'] = _apply_cookie_profile_override(
+        o['ytdl_options_overrides'],
+        profile_cookiefile,
+    )
     log.info(
-        "Add download request: type=%s quality=%s format=%s has_folder=%s auto_start=%s",
+        "Add download request: type=%s quality=%s format=%s has_folder=%s auto_start=%s has_profile_cookies=%s",
         o['download_type'],
         o['quality'],
         o['format'],
         bool(o.get('folder')),
         o['auto_start'],
+        bool(profile_cookiefile),
     )
     status = await dqueue.add(
         o['url'],
@@ -1075,21 +1242,48 @@ async def start(request):
 @routes.post(config.URL_PREFIX + 'upload-cookies')
 async def upload_cookies(request):
     reader = await request.multipart()
-    field = await reader.next()
-    if field is None or field.name != 'cookies':
+    content = None
+    profile_id = None
+    size = 0
+    max_size = 1_000_000  # 1MB limit
+
+    while True:
+        field = await reader.next()
+        if field is None:
+            break
+        if field.name == 'cookie_profile':
+            profile_id = _parse_cookie_profile((await field.text()).strip())
+            continue
+        if field.name != 'cookies':
+            continue
+
+        content = bytearray()
+        while True:
+            chunk = await field.read_chunk()
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_size:
+                return web.Response(status=400, text=serializer.encode({'status': 'error', 'msg': 'Cookie file too large (max 1MB)'}))
+            content.extend(chunk)
+
+    if content is None:
         return web.Response(status=400, text=serializer.encode({'status': 'error', 'msg': 'No cookies file provided'}))
 
-    max_size = 1_000_000  # 1MB limit
-    size = 0
-    content = bytearray()
-    while True:
-        chunk = await field.read_chunk()
-        if not chunk:
-            break
-        size += len(chunk)
-        if size > max_size:
-            return web.Response(status=400, text=serializer.encode({'status': 'error', 'msg': 'Cookie file too large (max 1MB)'}))
-        content.extend(chunk)
+    if profile_id:
+        try:
+            status = cookie_profiles.put(profile_id, bytes(content))
+        except ValueError as exc:
+            raise web.HTTPBadRequest(reason=str(exc)) from exc
+        log.info('Profile cookies uploaded (%s bytes)', size)
+        return web.Response(text=serializer.encode({
+            'status': 'ok',
+            'msg': f'Session cookies uploaded ({size} bytes)',
+            'has_cookies': True,
+            'has_profile_cookies': status['has_cookies'],
+            'expires_at': status['expires_at'],
+            'ttl_seconds': status['ttl_seconds'],
+        }))
 
     os.makedirs(os.path.dirname(COOKIES_PATH), exist_ok=True)
     tmp_cookie_path = f"{COOKIES_PATH}.tmp"
@@ -1108,6 +1302,15 @@ async def upload_cookies(request):
 
 @routes.post(config.URL_PREFIX + 'delete-cookies')
 async def delete_cookies(request):
+    post = {}
+    if getattr(request, 'content_type', '') == 'application/json':
+        post = await _read_json_request(request)
+    profile_id = _parse_cookie_profile(post.get('cookie_profile')) if isinstance(post, dict) else None
+    if profile_id:
+        cookie_profiles.delete(profile_id)
+        log.info('Profile cookies deleted')
+        return web.Response(text=serializer.encode({'status': 'ok'}))
+
     has_uploaded_cookies = os.path.exists(COOKIES_PATH)
     has_external_cookies = bool(EXTERNAL_COOKIES_PATH) and os.path.exists(EXTERNAL_COOKIES_PATH)
     configured_cookiefile = config.YTDL_OPTIONS.get('cookiefile')
@@ -1150,12 +1353,22 @@ async def delete_cookies(request):
 
 @routes.get(config.URL_PREFIX + 'cookie-status')
 async def cookie_status(request):
+    profile_id = _request_cookie_profile(request)
+    profile_status = cookie_profiles.status(profile_id)
     detected_cookie_path = _sync_cookie_runtime_override()
     configured_cookiefile = config.YTDL_OPTIONS.get('cookiefile')
     has_configured_cookies = isinstance(configured_cookiefile, str) and os.path.exists(configured_cookiefile)
     has_uploaded_cookies = any(os.path.exists(path) for path in _cookie_candidate_paths())
-    exists = bool(detected_cookie_path) or has_uploaded_cookies or has_configured_cookies
-    return web.Response(text=serializer.encode({'status': 'ok', 'has_cookies': exists}))
+    has_global_cookies = bool(detected_cookie_path) or has_uploaded_cookies or has_configured_cookies
+    exists = profile_status['has_cookies'] or has_global_cookies
+    return web.Response(text=serializer.encode({
+        'status': 'ok',
+        'has_cookies': exists,
+        'has_profile_cookies': profile_status['has_cookies'],
+        'has_global_cookies': has_global_cookies,
+        'expires_at': profile_status['expires_at'],
+        'ttl_seconds': profile_status['ttl_seconds'],
+    }))
 
 @routes.get(config.URL_PREFIX + 'history')
 async def history(request):
@@ -1301,6 +1514,7 @@ app.router.add_route('OPTIONS', config.URL_PREFIX + 'subscriptions/delete', add_
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'subscriptions/check', add_cors)
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'upload-cookies', add_cors)
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'delete-cookies', add_cors)
+app.router.add_route('OPTIONS', config.URL_PREFIX + 'cookie-status', add_cors)
 
 async def on_prepare(request, response):
     origin = request.headers.get('Origin')

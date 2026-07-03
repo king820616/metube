@@ -8,6 +8,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 export interface AddDownloadPayload {
   url: string;
+  cookieProfile?: string;
   downloadType: string;
   codec: string;
   quality: string;
@@ -148,6 +149,7 @@ export class DownloadsService {
       ytdl_options_presets: payload.ytdlOptionsPresets,
       ytdl_options_overrides: payload.ytdlOptionsOverrides,
     };
+    if (payload.cookieProfile) body['cookie_profile'] = payload.cookieProfile;
     const cs = payload.clipStart?.trim();
     const ce = payload.clipEnd?.trim();
     if (cs) body['clip_start'] = cs;
@@ -197,22 +199,32 @@ export class DownloadsService {
     );
   }
 
-  uploadCookies(file: File) {
+  uploadCookies(file: File, cookieProfile?: string) {
     const formData = new FormData();
     formData.append('cookies', file);
+    if (cookieProfile) formData.append('cookie_profile', cookieProfile);
     return this.http.post<{ status: string; msg?: string }>('upload-cookies', formData).pipe(
       catchError(this.handleHTTPError)
     );
   }
 
-  deleteCookies() {
-    return this.http.post<{ status: string; msg?: string }>('delete-cookies', {}).pipe(
+  deleteCookies(cookieProfile?: string) {
+    const body = cookieProfile ? { cookie_profile: cookieProfile } : {};
+    return this.http.post<{ status: string; msg?: string }>('delete-cookies', body).pipe(
       catchError(this.handleHTTPError)
     );
   }
 
-  getCookieStatus() {
-    return this.http.get<{ status: string; has_cookies: boolean }>('cookie-status').pipe(
+  getCookieStatus(cookieProfile?: string) {
+    const url = cookieProfile ? `cookie-status?cookie_profile=${encodeURIComponent(cookieProfile)}` : 'cookie-status';
+    return this.http.get<{
+      status: string;
+      has_cookies: boolean;
+      has_profile_cookies?: boolean;
+      has_global_cookies?: boolean;
+      expires_at?: number | null;
+      ttl_seconds?: number;
+    }>(url).pipe(
       catchError(this.handleHTTPError)
     );
   }

@@ -108,7 +108,10 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   checkingAllSubscriptions = false;
   checkingSelectedSubscriptions = false;
   hasCookies = false;
+  hasProfileCookies = false;
+  hasGlobalCookies = false;
   cookieUploadInProgress = false;
+  private readonly cookieProfile = this.getOrCreateCookieProfile();
   themes: Theme[] = Themes;
   activeTheme: Theme | undefined;
   readonly folderTypeahead = viewChild<NgbTypeahead>('folderTypeahead');
@@ -313,10 +316,7 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   }
 
   ngOnInit() {
-    this.downloads.getCookieStatus().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(data => {
-      this.hasCookies = !!(data && typeof data === 'object' && 'has_cookies' in data && data.has_cookies);
-      this.cdr.markForCheck();
-    });
+    this.refreshCookieStatus();
     this.getConfiguration();
     this.getYtdlOptionsUpdateTime();
     this.getYtdlOptionPresets();
@@ -1045,6 +1045,7 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
     const allowYtdlOptionsOverrides = this.allowYtdlOptionsOverrides();
     return {
       url: overrides.url ?? this.addUrl,
+      cookieProfile: overrides.cookieProfile ?? this.cookieProfile,
       downloadType: overrides.downloadType ?? this.downloadType,
       codec: overrides.codec ?? this.codec,
       quality: overrides.quality ?? this.quality,
@@ -1557,10 +1558,11 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
     const input = event.target as HTMLInputElement;
     if (!input.files?.length) return;
     this.cookieUploadInProgress = true;
-    this.downloads.uploadCookies(input.files[0]).subscribe({
+    this.downloads.uploadCookies(input.files[0], this.cookieProfile).subscribe({
       next: (response) => {
         if (response?.status === 'ok') {
           this.hasCookies = true;
+          this.hasProfileCookies = true;
         } else {
           this.refreshCookieStatus();
           this.toasts.error(`Error uploading cookies: ${this.formatErrorMessage(response?.msg)}`);
@@ -1599,7 +1601,7 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   }
 
   deleteCookies() {
-    this.downloads.deleteCookies().subscribe({
+    this.downloads.deleteCookies(this.cookieProfile).subscribe({
       next: (response) => {
         if (response?.status === 'ok') {
           this.refreshCookieStatus();
@@ -1616,9 +1618,44 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   }
 
   private refreshCookieStatus() {
-    this.downloads.getCookieStatus().subscribe(data => {
+    this.downloads.getCookieStatus(this.cookieProfile).subscribe(data => {
       this.hasCookies = !!(data && typeof data === 'object' && 'has_cookies' in data && data.has_cookies);
+      this.hasProfileCookies = !!(data && typeof data === 'object' && 'has_profile_cookies' in data && data.has_profile_cookies);
+      this.hasGlobalCookies = !!(data && typeof data === 'object' && 'has_global_cookies' in data && data.has_global_cookies);
+      this.cdr.markForCheck();
     });
+  }
+
+  private getOrCreateCookieProfile(): string {
+    const key = 'metube_cookie_profile';
+    try {
+      const storage = globalThis.localStorage;
+      const existing = storage?.getItem(key);
+      if (existing && /^[A-Za-z0-9._~-]{16,256}$/.test(existing)) {
+        return existing;
+      }
+      const created = this.createCookieProfileToken();
+      storage?.setItem(key, created);
+      return created;
+    } catch {
+      return this.createCookieProfileToken();
+    }
+  }
+
+  private createCookieProfileToken(): string {
+    const bytes = new Uint8Array(32);
+    try {
+      globalThis.crypto?.getRandomValues(bytes);
+    } catch {
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = Math.floor(Math.random() * 256);
+      }
+    }
+    let binary = '';
+    for (const byte of bytes) {
+      binary += String.fromCharCode(byte);
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
   }
 
   private updateMetrics() {

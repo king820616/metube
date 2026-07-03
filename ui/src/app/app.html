@@ -582,9 +582,9 @@
                   <div class="cookie-status" [class.active]="hasCookies">
                     @if (hasCookies) {
                       <fa-icon [icon]="faCheckCircle" class="me-1" />
-                      Cookies active
+                      {{ hasProfileCookies ? 'Session cookies active' : 'Global cookies active' }}
                     } @else {
-                      No cookies configured
+                      No session cookies
                     }
                   </div>
                 </div>

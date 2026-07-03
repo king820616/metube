@@ -108,6 +108,22 @@ describe('DownloadsService', () => {
     req.flush({ status: 'ok' });
   });
 
+  it('add() sends cookie_profile when set', () => {
+    service
+      .add({
+        ...basePayload(),
+        cookieProfile: 'profile-token-1234567890',
+      })
+      .subscribe();
+    const req = httpMock.expectOne('add');
+    expect(req.request.body).toEqual(
+      expect.objectContaining({
+        cookie_profile: 'profile-token-1234567890',
+      }),
+    );
+    req.flush({ status: 'ok' });
+  });
+
   it('getPresets() fetches configured preset names', () => {
     service.getPresets().subscribe((result) => {
       expect(result).toEqual({ presets: ['Preset A'] });

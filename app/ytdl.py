@@ -177,6 +177,31 @@ class DownloadQueueNotifier:
     async def cleared(self, id):
         raise NotImplementedError
 
+
+_SENSITIVE_YTDL_OPTION_KEYS = {
+    'cookiefile',
+    'cookiesfrombrowser',
+    'cookies_from_browser',
+    'username',
+    'password',
+    'videopassword',
+    'ap_username',
+    'ap_password',
+    'client_certificate',
+    'client_certificate_key',
+    'client_certificate_password',
+}
+
+
+def _public_ytdl_options(options: Any) -> Any:
+    if not isinstance(options, dict):
+        return options
+    return {
+        key: value
+        for key, value in options.items()
+        if key not in _SENSITIVE_YTDL_OPTION_KEYS
+    }
+
 class DownloadInfo:
     def __init__(
         self,
@@ -240,11 +265,14 @@ class DownloadInfo:
 
     def to_public_dict(self) -> dict:
         """Return the client-facing view, omitting server-only/bulky fields."""
-        return {
+        public = {
             k: v
             for k, v in self.__dict__.items()
             if k not in self._PUBLIC_EXCLUDED_FIELDS
         }
+        if 'ytdl_options_overrides' in public:
+            public['ytdl_options_overrides'] = _public_ytdl_options(public['ytdl_options_overrides'])
+        return public
 
     def __setstate__(self, state):
         """BACKWARD COMPATIBILITY: migrate old DownloadInfo from persistent queue files."""
@@ -376,6 +404,8 @@ def _download_info_to_record(
     for key in _PERSISTED_DOWNLOAD_FIELDS:
         if hasattr(info, key):
             value = getattr(info, key)
+            if key == "ytdl_options_overrides":
+                value = _public_ytdl_options(value)
             if value is not None:
                 record[key] = to_json_compatible(value)
     if include_entry:

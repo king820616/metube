@@ -21,7 +21,7 @@ class DownloadsServiceStub {
   updated = new Subject<void>();
 
   getCookieStatus() {
-    return of({ status: 'ok', has_cookies: false });
+    return of({ status: 'ok', has_cookies: false, has_profile_cookies: false, has_global_cookies: false });
   }
 
   getPresets() {

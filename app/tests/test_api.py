@@ -83,6 +83,31 @@ async def test_add_passes_preset_and_overrides(mock_dqueue, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_add_uses_cookie_profile_cookiefile(mock_dqueue):
+    profile_id = "profile-token-1234567890"
+    main.cookie_profiles.put(profile_id, b"# Netscape HTTP Cookie File\n")
+    try:
+        req = _json_request(_valid_video_add_body(cookie_profile=profile_id))
+        resp = await main.add(req)
+        assert resp.status == 200
+        call = mock_dqueue.add.await_args
+        assert call is not None
+        overrides = call.args[14]
+        assert os.path.exists(overrides["cookiefile"])
+        assert ".metube-cookie-profiles" in overrides["cookiefile"]
+    finally:
+        main.cookie_profiles.delete(profile_id)
+
+
+@pytest.mark.asyncio
+async def test_add_rejects_invalid_cookie_profile(mock_dqueue):
+    req = _json_request(_valid_video_add_body(cookie_profile="bad"))
+    with pytest.raises(web.HTTPBadRequest):
+        await main.add(req)
+    mock_dqueue.add.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_add_legacy_string_preset_normalized(mock_dqueue, monkeypatch):
     monkeypatch.setattr(main.config, "YTDL_OPTIONS_PRESETS", {"Legacy": {}})
     body = _valid_video_add_body()
@@ -253,6 +278,25 @@ async def test_cookie_status(mock_dqueue):
     data = json.loads(resp.text)
     assert data.get("status") == "ok"
     assert "has_cookies" in data
+    assert "has_profile_cookies" in data
+    assert "has_global_cookies" in data
+
+
+@pytest.mark.asyncio
+async def test_cookie_status_detects_profile_cookie(mock_dqueue):
+    profile_id = "profile-token-status-123"
+    main.cookie_profiles.put(profile_id, b"# Netscape HTTP Cookie File\n")
+    try:
+        req = MagicMock(spec=web.Request)
+        req.query = {"cookie_profile": profile_id}
+        resp = await main.cookie_status(req)
+        assert resp.status == 200
+        data = json.loads(resp.text)
+        assert data["has_cookies"] is True
+        assert data["has_profile_cookies"] is True
+        assert data["expires_at"] is not None
+    finally:
+        main.cookie_profiles.delete(profile_id)
 
 
 @pytest.mark.asyncio
@@ -265,7 +309,9 @@ async def test_cookie_status_detects_external_cookie(mock_dqueue, tmp_path, monk
         resp = await main.cookie_status(req)
         assert resp.status == 200
         data = json.loads(resp.text)
-        assert data == {"status": "ok", "has_cookies": True}
+        assert data["status"] == "ok"
+        assert data["has_cookies"] is True
+        assert data["has_global_cookies"] is True
     finally:
         main.config.remove_runtime_override("cookiefile")
 

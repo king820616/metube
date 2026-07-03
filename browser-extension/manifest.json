@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "MeTube Cookie Helper",
+  "description": "Authorize the current MeTube session to use this browser's YouTube cookies.",
+  "version": "0.1.0",
+  "permissions": [
+    "activeTab",
+    "cookies",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://youtube.com/*",
+    "https://*.youtube.com/*"
+  ],
+  "action": {
+    "default_title": "Authorize MeTube cookies",
+    "default_popup": "popup.html"
+  }
+}
