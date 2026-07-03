@@ -1,8 +1,8 @@
-FROM node:lts-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS builder
 
 WORKDIR /metube
 COPY ui ./
-RUN corepack enable && corepack prepare pnpm --activate
+RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
 RUN CI=true pnpm install && pnpm run build
 
 
